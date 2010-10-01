@@ -1977,41 +1977,80 @@ bool factor_out::can_apply(iterator st)
 
 algorithm::result_t factor_out::apply(iterator& it)
 	{
+  // This collector is used to store the affected terms, split up into the factored out
+  // part and the remaining part. The factored out part is a new tree and acts as the key.
+  // The remaining term is left in the expression tree and is passed as an iterator pointing to it.
 	typedef std::multimap<exptree, sibling_iterator, exptree_is_less> collector_t;
 	collector_t collector;
 
-	// Find all terms in the sum which contain one or more factors of 
-	// the arguments. 
-
-	sibling_iterator st=tr.begin(it);
+	sibling_iterator st=tr.begin(it); // Iterator over each term in the sum.
 	size_t current_term=0;
 	while(st!=tr.end(it)) {
 		exptree powers_left, powers_right; // a collecting prod in which we store all factors which we find
 		powers_left.set_head(str_node("\\prod"));
 		powers_right.set_head(str_node("\\prod"));
+    bool flip_sign = false;
 	
 		// We count the powers of each factor that we want to move out,
 		// and also immediately delete these factors. 
 		for(unsigned int tfo=0; tfo<to_factor_out.size(); ++tfo) {
+      bool can_factor_left = true;
+      bool can_factor_right = true;
+
 			if(*st->name=="\\prod") {
-				sibling_iterator psi=tr.begin(st);
+				sibling_iterator psi=tr.begin(st); // Iterator over each term in the product
+        sibling_iterator factor_position;
 				bool firstfactor=true;
 				bool foundfactor=false;
+
+        // Check each term in the product to see if matches the factor we are looking for
 				while(psi!=tr.end(st)) {
 					exptree_comparator comparator;
-					if(comparator.equal_subtree(static_cast<iterator>(psi), 
-														 to_factor_out[tfo].begin()) ==exptree_comparator::subtree_match)  {
-						powers_left.append_child(powers_left.begin(), static_cast<iterator>(psi));
-						psi=tr.erase(psi);
-						foundfactor=true;
-						break;
+					if(!foundfactor && 
+             comparator.equal_subtree(
+               static_cast<iterator>(psi),
+               to_factor_out[tfo].begin()
+             ) == exptree_comparator::subtree_match)  {
+            // We found a term that matches the factor we are looking for. Note that this will match
+            // regardless of the index structure, which is WRONG.
+            foundfactor = true;
+            factor_position = psi;
+            if (can_factor_left)
+              break; // Don't need to check past factor.
 						}
 					else {
-						++psi;
 						firstfactor=false;
-						}
-					}
+            
+            // Figure out if the current term commutes with the factor
+            const CommutingBehaviour *factor_behaviour = properties::get<CommutingBehaviour>(to_factor_out[tfo].begin());
+            const CommutingBehaviour *term_behaviour   = properties::get<CommutingBehaviour>(psi);
+            int sign = 1; // Commutes by default
+            if (factor_behaviour != 0 && factor_behaviour == term_behaviour)
+              sign = factor_behaviour->sign();
+            if (sign == 0) {
+              if (!foundfactor) {
+                debugout << "Can't factor left" << std::endl;
+                can_factor_left = false;
+                }
+              else {
+                debugout << "Can't factor right" << std::endl;
+                can_factor_right = false;
+                }
+					  	}
+					  }
+
+          ++psi;
+          }
 				if(foundfactor) {
+          if (can_factor_left) {
+            powers_left.append_child(powers_left.begin(), static_cast<iterator>(factor_position));
+            tr.erase(factor_position);
+            }
+          else if (can_factor_right) {
+            powers_right.append_child(powers_right.begin(), static_cast<iterator>(factor_position));
+            tr.erase(factor_position);
+            }
+
 					if(firstfactor==false) 
 						expression_modified=true;
 					if(tr.number_of_children(st)==0) {
@@ -2027,6 +2066,8 @@ algorithm::result_t factor_out::apply(iterator& it)
 					}
 				}
 			else {
+        // If the term is the factor we are looking for then we pull the factor
+        // out and replace it by a 1.
 				exptree_comparator comparator;
 				if(comparator.equal_subtree(static_cast<iterator>(st), 
 													 to_factor_out[tfo].begin())==exptree_comparator::subtree_match) {
@@ -2038,42 +2079,73 @@ algorithm::result_t factor_out::apply(iterator& it)
 					}
 				}
 			}
-		if(powers_left.number_of_children(powers_left.begin())>0)
-			collector.insert(std::make_pair(powers_left, st));
-		
+
+    if(flip_sign) {
+      multiply(st->multiplier, -1);
+    }
+
+    // powers_left is now a product of all the factors that were found in the 
+    // current term of the sum.
+		if (powers_left.number_of_children(powers_left.begin()) > 0 ||
+        powers_right.number_of_children(powers_right.begin()) > 0) {
+      exptree sum;
+      // encode as powers_left + powers_right so that we can still use the
+      // existing method with an exptree as the key.
+      sum.set_head(str_node("\\sum"));
+      sum.append_child(sum.begin(), powers_left.begin());
+      sum.append_child(sum.begin(), powers_right.begin());
+      sum.print_entire_tree(debugout);
+			collector.insert(std::make_pair(sum, st));
+      }
+
 		++current_term;
 		++st;
-		}
-	if(collector.size()==0) return l_no_action;
 
-	// Now generate all new, factorised terms.
-	collector_t::iterator ci=collector.begin();
+		}
+
+	if(collector.size()==0) return l_no_action; // No factors were extraced from any term.
+
+  // The expression is currently in a weird state - we have pulled out all of the factors from each
+  // term that they appeared, but not added them back in anywhere. Since we now have a multimap with 
+  // keys corresponding to each type of factor (A, B, AB, etc) and members corresponding to the rest 
+  // of the term that they came from, we can go through and collect together terms that had the same 
+  // factor.
+  collector_t::iterator ci=collector.begin();
 	exptree oldkey = (*ci).first;
 	while(ci!=collector.end()) {
 		 exptree term;
-		 term.set_head(str_node("\\prod"));
+		 term.set_head(str_node("\\prod")); // The * in (factor * (a + b + c)).
 		 const exptree thiskey=(*ci).first;
+     sibling_iterator sum_iter = thiskey.begin(thiskey.begin()); // head node of left factors + right factors
+     iterator left_factors = sum_iter;
+     iterator right_factors = ++sum_iter;
 
-		 term.reparent(term.begin(), thiskey.begin());
+		 term.reparent(term.begin(), left_factors);
 
 		 sibling_iterator sumit=term.append_child(term.begin(),str_node("\\sum"));
 		 size_t terms=0;
 		 exptree_is_equivalent cmp;
+     // Go through each item with the same factor and add the rest of the 
+     // term it came from to the sum (also remove it from the tree since we
+     // will add it back in)
 		 while(ci!=collector.end() && cmp((*ci).first, oldkey)) {
 			  term.append_child(sumit, (*ci).second);
 			  tr.erase((*ci).second);
 			  ++terms;
 			  ++ci;
 			  }
-//		 std::cerr << "terms=" << terms << std::endl;
+
+     term.reparent(term.begin(), right_factors);
+
 		 if(terms>1) 
 			  expression_modified=true;
 
-		 // Insert the newly generated term into the tree.
 		 if(terms==1) { // a sum with only one child
 			  term.flatten(sumit);
 			  term.erase(sumit);
 			  }
+
+     // Put our factor * (a + b + ...) piece back into the tree.
 		 tr.insert_subtree(tr.begin(it), term.begin());
 
 		 if(ci==collector.end())
@@ -2085,7 +2157,9 @@ algorithm::result_t factor_out::apply(iterator& it)
 		 tr.flatten(it);
 		 it=tr.erase(it);
 		 }
-	
+
+  //tr.print_entire_tree(debugout);
+
 	if(expression_modified) return l_applied;
 	else                    return l_no_action;
 	}

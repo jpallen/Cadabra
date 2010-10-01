@@ -39,6 +39,18 @@ tst5:=  a * c * (2 * e + 5) + c * ( - 2 * e + d - 1) + a * (3 * b - d + 1) + 7 *
 @collect_terms!(%);
 @assert(tst5);
 
+# Non Commutative objects
+@reset.
+{a,b,c,d,e,f}::NonCommuting.
+obj := a * b + c * a + a * d + e * a + b * a * c:
+@factor_out!(%)(a);
+tst := a * (b + d) + (c + e)*a + b * a * c) - @(obj);
+@collect_terms!(%);
+@assert(tst);
+
+
+# Indices
+
 @reset.
 {a,b,m,n,p,q}::Indices.
 obj6:= A_{m n} C_{m n} D_{p q} + A_{p m} C_{m n} D_{n q} + A_{m n} C_{m n} E_{p q} Q;
