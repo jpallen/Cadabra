@@ -2021,12 +2021,9 @@ algorithm::result_t factor_out::apply(iterator& it)
 					else {
 						firstfactor=false;
             
+            int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
+            int sign = exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
             // Figure out if the current term commutes with the factor
-            const CommutingBehaviour *factor_behaviour = properties::get<CommutingBehaviour>(to_factor_out[tfo].begin());
-            const CommutingBehaviour *term_behaviour   = properties::get<CommutingBehaviour>(psi);
-            int sign = 1; // Commutes by default
-            if (factor_behaviour != 0 && factor_behaviour == term_behaviour)
-              sign = factor_behaviour->sign();
             if (sign == 0) {
               if (!foundfactor) {
                 debugout << "Can't factor left" << std::endl;
