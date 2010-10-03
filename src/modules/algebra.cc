@@ -2026,14 +2026,14 @@ algorithm::result_t factor_out::apply(iterator& it)
 						debugout << "Sign is " << sign << std::endl;
 						if (sign == 0) {
 							if (!foundfactor) {
-							debugout << "Can't factor left" << std::endl;
-							can_factor_left = false;
-							}
-						else {
-							debugout << "Can't factor right" << std::endl;
-							can_factor_right = false;
-							}
-					  	}
+  								debugout << "Can't factor left" << std::endl;
+	  							can_factor_left = false;
+		  						}
+			  				else {
+				  				debugout << "Can't factor right" << std::endl;
+					  			can_factor_right = false;
+						  		}
+					  		}
 						if (sign == -1) {
 							if (!foundfactor) {
 								debugout << "Factoring left with an extra sign" << std::endl;
