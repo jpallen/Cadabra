@@ -48,6 +48,19 @@ tst := a * (b + d) + (c + e)*a + b * a * c) - @(obj);
 @collect_terms!(%);
 @assert(tst);
 
+# TODO!
+# It can't handle terms like b*a due to the way it checks each factor in turn.
+# Since a is checked before b, it is 'stuck' behind b and is ignored.
+@reset.
+{a,b,c,d,e,f}::NonCommuting.
+obj := a b c + a b d + b a e + b a f:
+@factor_out!(%)(a,b); # will only factor out a*b, not b*a
+
+# We actually get a b (c + e) + b (a e + a f).
+tst := a b (c + a) + b a (e + f) - @(obj);
+@collect_terms!(%);
+#@assert(tst);
+
 # Anti-commuting objects
 @reset;
 {a,b,c,d,e,f}::AntiCommuting.
