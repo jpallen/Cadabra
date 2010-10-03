@@ -39,12 +39,21 @@ tst5:=  a * c * (2 * e + 5) + c * ( - 2 * e + d - 1) + a * (3 * b - d + 1) + 7 *
 @collect_terms!(%);
 @assert(tst5);
 
-# Non Commutative objects
+# Non-commuting objects
 @reset.
 {a,b,c,d,e,f}::NonCommuting.
 obj := a * b + c * a + a * d + e * a + b * a * c:
 @factor_out!(%)(a);
 tst := a * (b + d) + (c + e)*a + b * a * c) - @(obj);
+@collect_terms!(%);
+@assert(tst);
+
+# Anti-commuting objects
+@reset;
+{a,b,c,d,e,f}::AntiCommuting.
+obj := a * b + c * a + a * d + e * a + b * a * c:
+@factor_out!(%)(a);
+tst := a * (b - c + d  - e  - b * c) - @(obj);
 @collect_terms!(%);
 @assert(tst);
 

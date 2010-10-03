@@ -1989,13 +1989,15 @@ algorithm::result_t factor_out::apply(iterator& it)
 		exptree powers_left, powers_right; // a collecting prod in which we store all factors which we find
 		powers_left.set_head(str_node("\\prod"));
 		powers_right.set_head(str_node("\\prod"));
-    bool flip_sign = false;
-	
+    int overall_sign = 1;
+
 		// We count the powers of each factor that we want to move out,
 		// and also immediately delete these factors. 
 		for(unsigned int tfo=0; tfo<to_factor_out.size(); ++tfo) {
       bool can_factor_left = true;
       bool can_factor_right = true;
+      int left_sign = 1;
+      int right_sign = 1;
 
 			if(*st->name=="\\prod") {
 				sibling_iterator psi=tr.begin(st); // Iterator over each term in the product
@@ -2024,6 +2026,7 @@ algorithm::result_t factor_out::apply(iterator& it)
             int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
             int sign = exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
             // Figure out if the current term commutes with the factor
+            debugout << "Sign is " << sign << std::endl;
             if (sign == 0) {
               if (!foundfactor) {
                 debugout << "Can't factor left" << std::endl;
@@ -2034,16 +2037,28 @@ algorithm::result_t factor_out::apply(iterator& it)
                 can_factor_right = false;
                 }
 					  	}
+            if (sign == -1) {
+              if (!foundfactor) {
+                debugout << "Factoring left with an extra sign" << std::endl;
+                left_sign *= -1;
+                }
+              else {
+                debugout << "Factoring right with an extra sign" << std::endl;
+                right_sign *= -1;
+                }
+              }
 					  }
 
           ++psi;
           }
 				if(foundfactor) {
           if (can_factor_left) {
+            overall_sign *= left_sign;
             powers_left.append_child(powers_left.begin(), static_cast<iterator>(factor_position));
             tr.erase(factor_position);
             }
           else if (can_factor_right) {
+            overall_sign *= right_sign;
             powers_right.append_child(powers_right.begin(), static_cast<iterator>(factor_position));
             tr.erase(factor_position);
             }
@@ -2077,9 +2092,7 @@ algorithm::result_t factor_out::apply(iterator& it)
 				}
 			}
 
-    if(flip_sign) {
-      multiply(st->multiplier, -1);
-    }
+    multiply(st->multiplier, overall_sign);
 
     // powers_left is now a product of all the factors that were found in the 
     // current term of the sum.
