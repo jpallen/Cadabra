@@ -1981,141 +1981,149 @@ algorithm::result_t factor_out::apply(iterator& it)
 	collector_t collector;
 
 	sibling_iterator st=tr.begin(it);
-	size_t current_term=0;
 	while(st!=tr.end(it)) {
-		exptree powers_left, powers_right; // a collecting prod in which we store all factors which we find
-		powers_left.set_head(str_node("\\prod"));
-		powers_right.set_head(str_node("\\prod"));
-		int overall_sign = 1;
+		exptree left_factors, right_factors; // a collecting prod in which we store all factors which we find
+		left_factors.set_head(str_node("\\prod"));
+		right_factors.set_head(str_node("\\prod"));
 
-		// We count the powers of each factor that we want to move out,
-		// and also immediately delete these factors. 
-		for(unsigned int tfo=0; tfo<to_factor_out.size(); ++tfo) {
-			bool can_factor_left = true;
-			bool can_factor_right = true;
-			int left_sign = 1;
-			int right_sign = 1;
+		if(*st->name=="\\prod") {
+			bool beginning_preserved = true;
 
-			if(*st->name=="\\prod") {
-				sibling_iterator psi=tr.begin(st);
-				sibling_iterator factor_position;
-				bool firstfactor=true;
-				bool foundfactor=false;
+			// factor_signs is used to store the sign that would need to be picked up 
+			// by each factor if it was to be moved through the terms we have encountered so far.
+			// A value of 0 means the factor can't be moved through the terms.
+			std::vector<int> factor_signs (to_factor_out.size(), 1);
 
-				// Check each term in the product to see if matches the factor we are looking for
-				while(psi!=tr.end(st)) {
+			// Go through each term and pull out any factors in a way that respects non and anti-commutivity.
+			for(sibling_iterator psi=tr.begin(st); psi!=tr.end(st); ++psi) {
+			    bool factor_removed = false;
+
+                // Check to see if the current term is one of the factors we are looking for.
+				for(unsigned int tfo=0; tfo<to_factor_out.size(); ++tfo) {
 					exptree_comparator comparator;
-					if(!foundfactor && 
-					   comparator.equal_subtree(
-					     static_cast<iterator>(psi),
-					     to_factor_out[tfo].begin()
-					   ) == exptree_comparator::subtree_match)  {
-						// We found a term that matches the factor we are looking for. Note that this will match
-						// regardless of the index structure, which is WRONG.
-						foundfactor = true;
-						factor_position = psi;
-						if (can_factor_left)
-							break; // Don't need to check past factor.
+					if(comparator.equal_subtree(static_cast<iterator>(psi),
+					                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
+						if (factor_signs[tfo] != 0) {
+							left_factors.append_child(left_factors.begin(), static_cast<iterator>(psi));
+							multiply(st->multiplier, factor_signs[tfo]);
+							tr.erase(psi);
+							factor_removed = true;
+							if (!beginning_preserved) // If we've gone past something which didn't pull out
+								expression_modified = true;
+							}
+						break;
 						}
-					else {
-						firstfactor=false;
+					}
+				
+				if (!factor_removed) {
+					// Strictly speaking the beginning may still be preserved, so we don't
+					// set expression_modified to true until we pull out another factor, in which
+					// case it definitely isn't.
+				    beginning_preserved = false;
 
+					// If the term wasn't moved to the front as a factor then we have to consider the
+					// commutivity properties of it with other factors that we may later move through it.
+					for(unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
 						int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
 						int sign = exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
-						// Figure out if the current term commutes with the factor
-						debugout << "Sign is " << sign << std::endl;
-						if (sign == 0) {
-							if (!foundfactor) {
-  								debugout << "Can't factor left" << std::endl;
-	  							can_factor_left = false;
-		  						}
-			  				else {
-				  				debugout << "Can't factor right" << std::endl;
-					  			can_factor_right = false;
-						  		}
-					  		}
-						if (sign == -1) {
-							if (!foundfactor) {
-								debugout << "Factoring left with an extra sign" << std::endl;
-								left_sign *= -1;
+						factor_signs[tfo] *= sign;
+						}
+					}
+				
+				// The above algorithm has each term compared to each factor twice. Once to check if the
+				// the term is a factor, and if not, once to check its commutitivity properties with the factors.
+				// It would be nice to only have one loop, but I think we need to know we're not going to move
+				// the term before we start working out the commutitivity properties.
+				}
+
+			// If removing factors reduced the term to something simple, modify the
+			// tree to show this.
+			if(tr.number_of_children(st)==0) {
+				rset_t::iterator mtmp=st->multiplier;
+				node_one(st);
+				st->multiplier=mtmp;
+				}
+			else if(tr.number_of_children(st)==1) {
+				multiply(tr.begin(st)->multiplier, *st->multiplier);
+				tr.flatten(st);
+				st=tr.erase(st);
+				}
+
+			// We have extracted the factors from the term, but they are not in any specific order.
+			// We want to put them in some canonical order so that equal factors are grouped.
+			// We will try to order them as close to the order specified by the user as possible.
+			sibling_iterator first_unordered_term = left_factors.begin(left_factors.begin());
+			for (unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
+				// Try to pull out each factor in turn from the remaining unordered part of the
+				// expression.
+				// NOTE: If X doesn't commute with A or B, and A and B are (anti)commuting then this
+				// will not put X A B And X B A in the same order since it only tries to pull
+				// terms to the very front, which for A and B it cannot do. This will only affect
+				// complicated expressions but is worth trying to fix.
+				int sign = 1;
+				for(sibling_iterator psi=first_unordered_term; psi != left_factors.end(left_factors.begin()); ++psi) {
+					exptree_comparator comparator;
+					if(comparator.equal_subtree(static_cast<iterator>(psi),
+					                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
+						if (sign != 0) {
+							if (psi == first_unordered_term) {
+								++first_unordered_term; // This is safe if nodes are linked rather than indexed?
 								}
 							else {
-								debugout << "Factoring right with an extra sign" << std::endl;
-								right_sign *= -1;
+								left_factors.move_before(first_unordered_term, psi);
+								multiply(st->multiplier, sign);
 								}
 							}
+						break;
 						}
-
-					++psi;
-					}
-				if(foundfactor) {
-					if (can_factor_left) {
-						overall_sign *= left_sign;
-						powers_left.append_child(powers_left.begin(), static_cast<iterator>(factor_position));
-						tr.erase(factor_position);
-						}
-					else if (can_factor_right) {
-						overall_sign *= right_sign;
-						powers_right.append_child(powers_right.begin(), static_cast<iterator>(factor_position));
-						tr.erase(factor_position);
-						}
-
-					if(firstfactor==false) 
-						expression_modified=true;
-					if(tr.number_of_children(st)==0) {
-						rset_t::iterator mtmp=st->multiplier;
-						node_one(st);
-						st->multiplier=mtmp;
-						}
-					else if(tr.number_of_children(st)==1) {
-						multiply(tr.begin(st)->multiplier, *st->multiplier);
-						tr.flatten(st);
-						st=tr.erase(st);
+					else {
+						int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
+						sign *= exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
+						if (sign == 0) break; // We're not going to be able to extract this factor.
 						}
 					}
 				}
-			else {
-				// If the term is the factor we are looking for then we pull the factor
-				// out and replace it by a 1.
+			}
+		else {
+			// If the term is a factor we are looking for then we pull the factor
+			// out and replace it by a 1.
+			for(unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
 				exptree_comparator comparator;
-				if(comparator.equal_subtree(static_cast<iterator>(st), 
+				if(comparator.equal_subtree(static_cast<iterator>(st),
 				                            to_factor_out[tfo].begin())==exptree_comparator::subtree_match) {
-					iterator tmp=powers_left.append_child(powers_left.begin(), static_cast<iterator>(st));
+					iterator tmp=left_factors.append_child(left_factors.begin(), static_cast<iterator>(st));
 					one(tmp->multiplier);
 					rset_t::iterator mtmp=st->multiplier;
 					node_one(st);
 					st->multiplier=mtmp;
+					break;
 					}
 				}
 			}
 
-		multiply(st->multiplier, overall_sign);
-
-		// powers_left is now a product of all the factors that were found in the 
+		// left_factors is now a product of all the factors that were found in the
 		// current term of the sum.
-		if (powers_left.number_of_children(powers_left.begin()) > 0 ||
-		    powers_right.number_of_children(powers_right.begin()) > 0) {
+		if (left_factors.number_of_children(left_factors.begin()) > 0 ||
+		    right_factors.number_of_children(right_factors.begin()) > 0) {
 			exptree sum;
-			// Encode as powers_left + powers_right so that we can still use the
+			// Encode as left_factors + right_factors so that we can still use the
 			// existing method with an exptree as the key. This is very hacky, and
-			// might cause problems if A + B is regarded as the same tree as B + A. 
+			// might cause problems if A + B is regarded as the same tree as B + A.
 			sum.set_head(str_node("\\sum"));
-			sum.append_child(sum.begin(), powers_left.begin());
-			sum.append_child(sum.begin(), powers_right.begin());
+			sum.append_child(sum.begin(), left_factors.begin());
+			sum.append_child(sum.begin(), right_factors.begin());
 			collector.insert(std::make_pair(sum, st));
 			}
 
-		++current_term;
 		++st;
-
 		}
 
 	if(collector.size()==0) return l_no_action;
 
 	// The expression is currently in a weird state - we have pulled out all of the factors from each
-	// term that they appeared, but not added them back in anywhere. Since we now have a multimap with 
-	// keys corresponding to each type of factor (A, B, AB, etc) and members corresponding to the rest 
-	// of the term that they came from, we can go through and collect together terms that had the same 
+	// term that they appeared, but not added them back in anywhere. Since we now have a multimap with
+	// keys corresponding to each type of factor (A, B, AB, etc) and members corresponding to the rest
+	// of the term that they came from, we can go through and collect together terms that had the same
 	// factor.
 	collector_t::iterator ci=collector.begin();
 	exptree oldkey = (*ci).first;
@@ -2127,12 +2135,13 @@ algorithm::result_t factor_out::apply(iterator& it)
 		iterator left_factors = sum_iter;
 		iterator right_factors = ++sum_iter;
 
-		term.reparent(term.begin(), left_factors);
+		if (thiskey.number_of_children(left_factors) > 0)
+			term.reparent(term.begin(), left_factors);
 
 		sibling_iterator sumit=term.append_child(term.begin(),str_node("\\sum"));
 		size_t terms=0;
 		exptree_is_equivalent cmp;
-		// Go through each item with the same factor and add the rest of the 
+		// Go through each item with the same factor and add the rest of the
 		// term it came from to the sum (also remove it from the tree since we
 		// will add it back in)
 		while(ci!=collector.end() && cmp((*ci).first, oldkey)) {
@@ -2142,9 +2151,10 @@ algorithm::result_t factor_out::apply(iterator& it)
 			++ci;
 			}
 
-		term.reparent(term.begin(), right_factors);
+		if (thiskey.number_of_children(right_factors) > 0)
+			term.reparent(term.begin(), right_factors);
 
-		if(terms>1) 
+		if(terms>1)
 			expression_modified=true;
 
 		if(terms==1) { // a sum with only one child
@@ -2165,8 +2175,7 @@ algorithm::result_t factor_out::apply(iterator& it)
 		it=tr.erase(it);
 		}
 
-	if(expression_modified) return l_applied;
-	else                    return l_no_action;
+	return l_applied;
 	}
 
 factor_in::factor_in(exptree& tr, iterator it)
