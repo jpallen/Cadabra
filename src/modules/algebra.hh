@@ -438,7 +438,10 @@ class factor_out : public algorithm {
 
 	protected:
 		typedef std::vector<exptree> to_factor_out_t;
-		 to_factor_out_t             to_factor_out;
+		to_factor_out_t             to_factor_out;
+
+	private:
+		void extract_factors(sibling_iterator product, bool left_to_right, exptree& collector);
 };
 
 class canonicalise : public algorithm {

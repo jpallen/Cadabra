@@ -1987,55 +1987,9 @@ algorithm::result_t factor_out::apply(iterator& it)
 		right_factors.set_head(str_node("\\prod"));
 
 		if(*st->name=="\\prod") {
-			bool beginning_preserved = true;
-
-			// factor_signs is used to store the sign that would need to be picked up 
-			// by each factor if it was to be moved through the terms we have encountered so far.
-			// A value of 0 means the factor can't be moved through the terms.
-			std::vector<int> factor_signs (to_factor_out.size(), 1);
-
-			// Go through each term and pull out any factors in a way that respects non and anti-commutivity.
-			for(sibling_iterator psi=tr.begin(st); psi!=tr.end(st); ++psi) {
-			    bool factor_removed = false;
-
-                // Check to see if the current term is one of the factors we are looking for.
-				for(unsigned int tfo=0; tfo<to_factor_out.size(); ++tfo) {
-					exptree_comparator comparator;
-					if(comparator.equal_subtree(static_cast<iterator>(psi),
-					                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
-						if (factor_signs[tfo] != 0) {
-							left_factors.append_child(left_factors.begin(), static_cast<iterator>(psi));
-							multiply(st->multiplier, factor_signs[tfo]);
-							tr.erase(psi);
-							factor_removed = true;
-							if (!beginning_preserved) // If we've gone past something which didn't pull out
-								expression_modified = true;
-							}
-						break;
-						}
-					}
-				
-				if (!factor_removed) {
-					// Strictly speaking the beginning may still be preserved, so we don't
-					// set expression_modified to true until we pull out another factor, in which
-					// case it definitely isn't.
-				    beginning_preserved = false;
-
-					// If the term wasn't moved to the front as a factor then we have to consider the
-					// commutivity properties of it with other factors that we may later move through it.
-					for(unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
-						int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
-						int sign = exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
-						factor_signs[tfo] *= sign;
-						}
-					}
-				
-				// The above algorithm has each term compared to each factor twice. Once to check if the
-				// the term is a factor, and if not, once to check its commutitivity properties with the factors.
-				// It would be nice to only have one loop, but I think we need to know we're not going to move
-				// the term before we start working out the commutitivity properties.
-				}
-
+			extract_factors(st, true, left_factors);
+			extract_factors(st, false, right_factors);
+			
 			// If removing factors reduced the term to something simple, modify the
 			// tree to show this.
 			if(tr.number_of_children(st)==0) {
@@ -2119,7 +2073,7 @@ algorithm::result_t factor_out::apply(iterator& it)
 		}
 
 	if(collector.size()==0) return l_no_action;
-
+	
 	// The expression is currently in a weird state - we have pulled out all of the factors from each
 	// term that they appeared, but not added them back in anywhere. Since we now have a multimap with
 	// keys corresponding to each type of factor (A, B, AB, etc) and members corresponding to the rest
@@ -2176,6 +2130,92 @@ algorithm::result_t factor_out::apply(iterator& it)
 		}
 
 	return l_applied;
+	}
+	
+/*
+	extract_factors takes a product node in the tree and extracts all the
+	factors it can, respecting anti and non-commutivity. The factors are
+	removed from the tree and placed into _collector_, which should be
+	an existing product node in a seperate tree. The factors will either
+	be extracted to the left if _left_to_right_ is true or from the right
+	if not.
+*/
+void factor_out::extract_factors(sibling_iterator product, bool left_to_right, exptree& collector) {
+	if (tr.number_of_children(product) == 0)
+		return;
+	
+	sibling_iterator begin, end;
+	if (left_to_right) {
+		// Set begin the to the left most child, end to the right most.
+		begin = tr.begin(product);
+		end = begin; end += tr.number_of_siblings(begin);
+		}
+	else {
+		// Set begin the to the right most child, end to the left most.
+		end = tr.begin(product);
+		begin = end; begin += tr.number_of_siblings(end);
+		}
+	
+	bool beginning_preserved = true;
+	// factor_signs is used to store the sign that would need to be picked up 
+	// by each factor if it was to be moved through the terms we have encountered so far.
+	// A value of 0 means the factor can't be moved through the terms.
+	std::vector<int> factor_signs (to_factor_out.size(), 1);
+
+	// Go through each term and pull out any factors in a way that respects non and anti-commutivity.
+	sibling_iterator current_term = begin;
+	bool first_element = true;
+	do {
+		// Loop through from begin to end, including both begin and end.
+		if (!first_element) {
+			if (left_to_right)
+				current_term++;
+			else
+				current_term--;
+			}
+		first_element = false;
+					
+		bool factor_removed = false;
+
+		// Check to see if the current term is one of the factors we are looking for.
+		for(unsigned int tfo=0; tfo<to_factor_out.size(); ++tfo) {
+			exptree_comparator comparator;
+			if(comparator.equal_subtree(static_cast<iterator>(current_term),
+			                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
+				if (factor_signs[tfo] != 0) {
+					// Extract the term into the collector and remove it from the tree, picking up
+					// a sign if necessary.
+					collector.append_child(collector.begin(), static_cast<iterator>(current_term));
+					multiply(product->multiplier, factor_signs[tfo]);
+					tr.erase(current_term);
+					factor_removed = true;
+					if (!beginning_preserved) // If we've gone past something which we didn't pull out
+						expression_modified = true;
+					}
+				break;
+				}
+			}
+
+		if (!factor_removed) {
+			// Strictly speaking the beginning may still be preserved, so we don't
+			// set expression_modified to true until we pull out another factor, in which
+			// case it definitely isn't.
+			beginning_preserved = false;
+
+			// If the term wasn't moved to the front as a factor then we have to consider the
+			// commutivity properties of it with other factors that we may later move through it.
+			for(unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
+				int stc = subtree_compare(to_factor_out[tfo].begin(), current_term);
+				int sign = exptree_ordering::can_swap(to_factor_out[tfo].begin(), current_term, stc);
+				factor_signs[tfo] *= sign;
+				}
+			}
+
+		// The above algorithm has each term compared to each factor twice. Once to check if the
+		// the term is a factor, and if not, once to check its commutitivity properties with the factors.
+		// It would be nice to only have one loop, but I think we need to know we're not going to move
+		// the term before we start working out the commutitivity properties.
+		} while(current_term != end);
 	}
 
 factor_in::factor_in(exptree& tr, iterator it)

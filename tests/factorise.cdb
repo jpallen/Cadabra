@@ -41,13 +41,12 @@ tst5:=  a * c * (2 * e + 5) + c * ( - 2 * e + d - 1) + a * (3 * b - d + 1) + 7 *
 
 # Non-commuting objects
 
-# Only left factors are pulled out for now
 # Basic behaviour
 @reset.
-{A, B, C, D}::NonCommuting.
-obj := A B + A C + D A:
+{A, B, C, D, E}::NonCommuting.
+obj := A B + A C + D A + E A:
 @factor_out!(%)(A);
-tst := A*(B + C) + D A - @(obj);
+tst := A*(B + C) + (D + E)*A - @(obj);
 @collect_terms!(%);
 @assert(tst);
 
@@ -69,6 +68,17 @@ tst := A B c * (X - Y) - @(obj);
 @collect_terms!(%);
 @assert(tst);
 
+# We don't order on the right yet.
+@reset.
+{A, B}::AntiCommuting.
+{A, X, Y}::NonCommuting.
+{B, X, Y}::NonCommuting.
+obj := A B c X + c B A Y + X A B c + Y c B A:
+@factor_out!(%)(c, A, B);
+tst := A B c * (X - Y) + (X - Y) * A B c- @(obj);
+@collect_terms!(%);
+#@assert(tst);
+
 # We can't order past a non-commuting variable yet.
 @reset.
 {A, B}::AntiCommuting.
@@ -76,9 +86,9 @@ tst := A B c * (X - Y) - @(obj);
 {B, X}::NonCommuting.
 obj := X A B Y + X B A Z:
 @factor_out!(%)(A, B, X);
-tst := X A B Y + X B A Z - @(obj);
+tst := X A B Y + X A B Z - @(obj);
 @collect_terms!(%);
-@assert(tst);
+#@assert(tst);
 
 # The workaround is to pull out the non-commuting variable first
 @reset.
