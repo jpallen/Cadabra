@@ -2197,9 +2197,14 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 	of factors given by the user while respecting non-commutivity.
 	_product_ is the term the factors were extracted from and is passed so that it
 	can pick up a sign if needed when ordering anti-commuting terms.
+	_first_unordered_term_ is the term in the expression we should start ordering from.
+	This is mostly used internally by the function so omit this argument to order from 
+	the beginning.
 */
-void factor_out::order_factors(sibling_iterator product, exptree& factors) {
-	sibling_iterator first_unordered_term = factors.begin(factors.begin());
+void factor_out::order_factors(sibling_iterator product, exptree& factors, sibling_iterator first_unordered_term) {
+	bool passed_non_commuting_term = false;
+	sibling_iterator first_non_commuting_term;
+	
 	for (unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
 		// Try to pull out each factor in turn from the remaining unordered part of the
 		// expression.
@@ -2221,15 +2226,38 @@ void factor_out::order_factors(sibling_iterator product, exptree& factors) {
 						multiply(product->multiplier, sign);
 						}
 					}
-				break;
 				}
 			else {
 				int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
 				sign *= exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
-				if (sign == 0) break; // We're not going to be able to extract this factor.
+				if (sign == 0) {
+					if (!passed_non_commuting_term) {
+						first_non_commuting_term = psi;
+						}
+					else {
+						if (factors.index(psi) < factors.index(first_non_commuting_term))
+							first_non_commuting_term = psi;
+						}
+					passed_non_commuting_term = true;
+					break; // We're not going to be able to extract this factor.
+					}
 				}
 			}
 		}
+	
+	// A non commuting term will stop us bringing anything that doesn't
+	// commute with it to the front. Thus we need to order all the terms 
+	// after it again.
+	if (passed_non_commuting_term) {
+		sibling_iterator next_term = ++first_non_commuting_term;
+		if (next_term != factors.end(factors.begin()))
+			order_factors(product, factors, next_term);
+		}
+	}
+
+void factor_out::order_factors(sibling_iterator product, exptree& factors) {
+	sibling_iterator first_unordered_term = factors.begin(factors.begin());
+	order_factors(product, factors, first_unordered_term);
 	}
 
 factor_in::factor_in(exptree& tr, iterator it)

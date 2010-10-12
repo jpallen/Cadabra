@@ -78,28 +78,27 @@ tst := c A B * (X - Y) + c * (X - Y) * A B - @(obj);
 @collect_terms!(%);
 @assert(tst);
 
-# We can't order past a non-commuting variable yet.
+# Ordering past a non commuting term
 @reset.
-{A, B}::AntiCommuting.
+{A, B, C, D, E}::AntiCommuting.
 {A, X}::NonCommuting.
 {B, X}::NonCommuting.
 obj := X A B Y + X B A Z:
 @factor_out!(%)(A, B, X);
 tst := X A B (Y - Z) - @(obj);
 @collect_terms!(%);
-#@assert(tst);
+@assert(tst);
 
-# The workaround is to pull out the non-commuting variable first
-@reset.
-{A, B}::AntiCommuting.
-{A, X}::NonCommuting.
-{B, X}::NonCommuting.
-obj := X A B Y + X B A Z;
-@factor_out!(%)(X):
-@factor_out!(%)(A,B);
-# @factor_out should have flattened this - or is this a more general issue?
-tst := X (A B (Y - Z)) - @(obj);
-@collect_terms!(tst);
+obj := A B X A B Y + B A X B A Z:
+@factor_out!(%)(A, B, X);
+tst := A B X A B (Y + Z) - @(obj);
+@collect_terms!(%);
+@assert(tst);
+
+obj := A B C D Y + D A B C Z:
+@factor_out!(%)(A, B, C, D);
+tst := A B C D (Y - Z) - @(obj);
+@collect_terms!(%);
 @assert(tst);
 
 

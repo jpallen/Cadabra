@@ -443,6 +443,7 @@ class factor_out : public algorithm {
 	private:
 		void extract_factors(sibling_iterator product, bool left_to_right, exptree& collector);
 		void order_factors(sibling_iterator product, exptree& collector);
+		void order_factors(sibling_iterator product, exptree& collector, sibling_iterator first_unordered_term);
 };
 
 class canonicalise : public algorithm {
