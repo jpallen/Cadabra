@@ -1990,6 +1990,11 @@ algorithm::result_t factor_out::apply(iterator& it)
 			extract_factors(st, true, left_factors);
 			extract_factors(st, false, right_factors);
 			
+			// The factors are not extracted in any particular order.
+			// We want to put them in some canonical order so that equal factors are grouped.
+			order_factors(st, left_factors);
+			order_factors(st, right_factors);
+			
 			// If removing factors reduced the term to something simple, modify the
 			// tree to show this.
 			if(tr.number_of_children(st)==0) {
@@ -2001,41 +2006,6 @@ algorithm::result_t factor_out::apply(iterator& it)
 				multiply(tr.begin(st)->multiplier, *st->multiplier);
 				tr.flatten(st);
 				st=tr.erase(st);
-				}
-
-			// We have extracted the factors from the term, but they are not in any specific order.
-			// We want to put them in some canonical order so that equal factors are grouped.
-			// We will try to order them as close to the order specified by the user as possible.
-			sibling_iterator first_unordered_term = left_factors.begin(left_factors.begin());
-			for (unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
-				// Try to pull out each factor in turn from the remaining unordered part of the
-				// expression.
-				// NOTE: If X doesn't commute with A or B, and A and B are (anti)commuting then this
-				// will not put X A B And X B A in the same order since it only tries to pull
-				// terms to the very front, which for A and B it cannot do. This will only affect
-				// complicated expressions but is worth trying to fix.
-				int sign = 1;
-				for(sibling_iterator psi=first_unordered_term; psi != left_factors.end(left_factors.begin()); ++psi) {
-					exptree_comparator comparator;
-					if(comparator.equal_subtree(static_cast<iterator>(psi),
-					                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
-						if (sign != 0) {
-							if (psi == first_unordered_term) {
-								++first_unordered_term; // This is safe if nodes are linked rather than indexed?
-								}
-							else {
-								left_factors.move_before(first_unordered_term, psi);
-								multiply(st->multiplier, sign);
-								}
-							}
-						break;
-						}
-					else {
-						int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
-						sign *= exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
-						if (sign == 0) break; // We're not going to be able to extract this factor.
-						}
-					}
 				}
 			}
 		else {
@@ -2156,17 +2126,17 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 		begin = end; begin += tr.number_of_siblings(end);
 		}
 	
-	bool beginning_preserved = true;
 	// factor_signs is used to store the sign that would need to be picked up 
 	// by each factor if it was to be moved through the terms we have encountered so far.
 	// A value of 0 means the factor can't be moved through the terms.
 	std::vector<int> factor_signs (to_factor_out.size(), 1);
+	
+	bool beginning_preserved = true;
 
 	// Go through each term and pull out any factors in a way that respects non and anti-commutivity.
-	sibling_iterator current_term = begin;
 	bool first_element = true;
-	do {
-		// Loop through from begin to end, including both begin and end.
+	sibling_iterator current_term = begin;
+	do { // Loop through from begin to end, including both begin and end.
 		if (!first_element) {
 			if (left_to_right)
 				current_term++;
@@ -2185,7 +2155,10 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 				if (factor_signs[tfo] != 0) {
 					// Extract the term into the collector and remove it from the tree, picking up
 					// a sign if necessary.
-					collector.append_child(collector.begin(), static_cast<iterator>(current_term));
+					if (left_to_right)
+						collector.append_child(collector.begin(), static_cast<iterator>(current_term));
+					else
+						collector.prepend_child(collector.begin(), static_cast<iterator>(current_term));
 					multiply(product->multiplier, factor_signs[tfo]);
 					tr.erase(current_term);
 					factor_removed = true;
@@ -2216,6 +2189,47 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 		// It would be nice to only have one loop, but I think we need to know we're not going to move
 		// the term before we start working out the commutitivity properties.
 		} while(current_term != end);
+	}
+
+/*
+	order_factors takes an expression tree, _factors_, with a \prod node as head, and 
+	orders the terms in it. They are ordered as close as possible to the order 
+	of factors given by the user while respecting non-commutivity.
+	_product_ is the term the factors were extracted from and is passed so that it
+	can pick up a sign if needed when ordering anti-commuting terms.
+*/
+void factor_out::order_factors(sibling_iterator product, exptree& factors) {
+	sibling_iterator first_unordered_term = factors.begin(factors.begin());
+	for (unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
+		// Try to pull out each factor in turn from the remaining unordered part of the
+		// expression.
+		// NOTE: If X doesn't commute with A or B, and A and B are (anti)commuting then this
+		// will not put X A B And X B A in the same order since it only tries to pull
+		// terms to the very front, which for A and B it cannot do. This will only affect
+		// complicated expressions but is worth trying to fix.
+		int sign = 1;
+		for(sibling_iterator psi=first_unordered_term; psi != factors.end(factors.begin()); ++psi) {
+			exptree_comparator comparator;
+			if(comparator.equal_subtree(static_cast<iterator>(psi),
+			                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
+				if (sign != 0) {
+					if (psi == first_unordered_term) {
+						++first_unordered_term; // This is safe if nodes are linked rather than indexed.
+						}
+					else {
+						factors.move_before(first_unordered_term, psi);
+						multiply(product->multiplier, sign);
+						}
+					}
+				break;
+				}
+			else {
+				int stc = subtree_compare(to_factor_out[tfo].begin(), psi);
+				sign *= exptree_ordering::can_swap(to_factor_out[tfo].begin(), psi, stc);
+				if (sign == 0) break; // We're not going to be able to extract this factor.
+				}
+			}
+		}
 	}
 
 factor_in::factor_in(exptree& tr, iterator it)
