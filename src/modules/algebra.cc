@@ -1961,6 +1961,7 @@ factor_out::factor_out(exptree& tr, iterator it)
 	{
 	}
 
+/// Check if the expression is a sum with more than one term
 bool factor_out::can_apply(iterator st)
 	{
 	if(*st->name=="\\sum") {
@@ -1975,14 +1976,26 @@ bool factor_out::can_apply(iterator st)
 	else return false;
 	}
 
+/** Tries to factor out the given factors from the expression.
+ *
+ * The algorithm goes through each term in the sum and extracts all factors
+ * from it. These are a stored in a list of factors along with the term they came from.
+ * Each different factor is then reinserted back into the expression but multiplied by
+ * the sum of all the terms that factor came from.
+ *
+ * Note that factors are extracted on both the left and right to allow for 
+ * non-commutative factoring, and A, B, and A * B are treated as seperate factors.
+ */
 algorithm::result_t factor_out::apply(iterator& it)
 	{
+	// For each term with factors, collector is used to store the factors
+	// and the rest of the term they came from.
 	typedef std::multimap<exptree, sibling_iterator, exptree_is_less> collector_t;
 	collector_t collector;
 
 	sibling_iterator st=tr.begin(it);
-	while(st!=tr.end(it)) {
-		exptree left_factors, right_factors; // a collecting prod in which we store all factors which we find
+	while(st!=tr.end(it)) { // Loop through each term in the sum
+		exptree left_factors, right_factors; // Where we will store extracted factors
 		left_factors.set_head(str_node("\\prod"));
 		right_factors.set_head(str_node("\\prod"));
 
@@ -2025,8 +2038,8 @@ algorithm::result_t factor_out::apply(iterator& it)
 				}
 			}
 
-		// left_factors is now a product of all the factors that were found in the
-		// current term of the sum.
+		// left_factors and right_factors are now products of the factors 
+		// that were found in the current term.
 		if (left_factors.number_of_children(left_factors.begin()) > 0 ||
 		    right_factors.number_of_children(right_factors.begin()) > 0) {
 			exptree sum;
@@ -2047,27 +2060,31 @@ algorithm::result_t factor_out::apply(iterator& it)
 	// The expression is currently in a weird state - we have pulled out all of the factors from each
 	// term that they appeared, but not added them back in anywhere. Since we now have a multimap with
 	// keys corresponding to each type of factor (A, B, AB, etc) and members corresponding to the rest
-	// of the term that they came from, we can go through and collect together terms that had the same
-	// factor.
+	// of the term that they came from, we can go through and collect together terms that have the same
+	// factor and reinsert them into the tree.
 	collector_t::iterator ci=collector.begin();
 	exptree oldkey = (*ci).first;
 	while(ci!=collector.end()) {
 		exptree term;
-		term.set_head(str_node("\\prod")); // The * in (factor * (a + b + c)).
+		term.set_head(str_node("\\prod")); // Create the * in (factor * (a + b + c)).
 		const exptree thiskey=(*ci).first;
+
+		// Extract left_factors and right_factors from how they were stored
+		// as left_factors + right_factors
 		sibling_iterator sum_iter = thiskey.begin(thiskey.begin());
 		iterator left_factors = sum_iter;
 		iterator right_factors = ++sum_iter;
 
+		// Insert left factors on the left.
 		if (thiskey.number_of_children(left_factors) > 0)
 			term.reparent(term.begin(), left_factors);
 
 		sibling_iterator sumit=term.append_child(term.begin(),str_node("\\sum"));
 		size_t terms=0;
 		exptree_is_equivalent cmp;
-		// Go through each item with the same factor and add the rest of the
-		// term it came from to the sum (also remove it from the tree since we
-		// will add it back in)
+		// Go through each term with the same factor and include it in the sum.
+		// We also remove it from the tree since it will be added back in in its
+		// factorised form.
 		while(ci!=collector.end() && cmp((*ci).first, oldkey)) {
 			term.append_child(sumit, (*ci).second);
 			tr.erase((*ci).second);
@@ -2075,6 +2092,7 @@ algorithm::result_t factor_out::apply(iterator& it)
 			++ci;
 			}
 
+		// Insert right factors on the right.
 		if (thiskey.number_of_children(right_factors) > 0)
 			term.reparent(term.begin(), right_factors);
 
@@ -2101,16 +2119,24 @@ algorithm::result_t factor_out::apply(iterator& it)
 
 	return l_applied;
 	}
-	
-/*
-	extract_factors takes a product node in the tree and extracts all the
-	factors it can, respecting anti and non-commutivity. The factors are
-	removed from the tree and placed into _collector_, which should be
-	an existing product node in a seperate tree. The factors will either
-	be extracted to the left if _left_to_right_ is true or from the right
-	if not.
-*/
-void factor_out::extract_factors(sibling_iterator product, bool left_to_right, exptree& collector) {
+
+/** Extracts all possible factors from a product node.
+ *
+ * extract_factors takes a product node in the main expression tree and
+ * extracts any factors which are present, respecting anti and non-commutivity.
+ * The factors are removed from the product node and placed into another
+ * provided product node. The factors will either be extracted to the left if
+ * left_to_right is true or from the right if not.
+ * 
+ * @param product a sibling_iterator pointing to the node of the expression 
+ * tree to extract the factors from. This should be a product node.
+ * @param left_to_right If true factors are extracted to the left,
+ * if false they are extracted to the right.
+ * @param collector an exptree with a product node as the head. Extracted
+ * factors are inserted into this as children.
+ */
+void factor_out::extract_factors(sibling_iterator product, bool left_to_right,
+                                 exptree& collector) {
 	if (tr.number_of_children(product) == 0)
 		return;
 	
@@ -2126,14 +2152,12 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 		begin = end; begin += tr.number_of_siblings(end);
 		}
 	
-	// factor_signs is used to store the sign that would need to be picked up 
-	// by each factor if it was to be moved through the terms we have encountered so far.
+	// factor_signs stores the sign that would need to be picked up by each factor if it
+	// was to be moved through the terms we have encountered so far.
 	// A value of 0 means the factor can't be moved through the terms.
 	std::vector<int> factor_signs (to_factor_out.size(), 1);
 	
 	bool beginning_preserved = true;
-
-	// Go through each term and pull out any factors in a way that respects non and anti-commutivity.
 	bool first_element = true;
 	sibling_iterator current_term = begin;
 	do { // Loop through from begin to end, including both begin and end.
@@ -2153,7 +2177,7 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 			if(comparator.equal_subtree(static_cast<iterator>(current_term),
 			                            to_factor_out[tfo].begin()) == exptree_comparator::subtree_match) {
 				if (factor_signs[tfo] != 0) {
-					// Extract the term into the collector and remove it from the tree, picking up
+					// Put the term into the collector and remove it from the tree, picking up
 					// a sign if necessary.
 					if (left_to_right)
 						collector.append_child(collector.begin(), static_cast<iterator>(current_term));
@@ -2162,7 +2186,8 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 					multiply(product->multiplier, factor_signs[tfo]);
 					tr.erase(current_term);
 					factor_removed = true;
-					if (!beginning_preserved) // If we've gone past something which we didn't pull out
+					if (!beginning_preserved)
+						// We've gone past a term which we didn't factor out
 						expression_modified = true;
 					}
 				break;
@@ -2191,15 +2216,22 @@ void factor_out::extract_factors(sibling_iterator product, bool left_to_right, e
 		} while(current_term != end);
 	}
 
-/*
-	order_factors takes an expression tree, _factors_, with a \prod node as head, and 
-	orders the terms in it. They are ordered as close as possible to the order 
-	of factors given by the user while respecting non-commutivity.
-	_product_ is the term the factors were extracted from and is passed so that it
-	can pick up a sign if needed when ordering anti-commuting terms.
-	_first_unordered_term_ is the term in the expression we should start ordering from.
-	This is mostly used internally by the function so omit this argument to order from 
-	the beginning.
+/** Takes an product of factors and tries to put its term
+ *  in the same order the factors were provided in.
+ *
+ * order_factors takes a product node of factors and orders the terms in it as closely as
+ * possible to the order of factors given by the user. Anti and non-commutivity
+ * are respected, and the sign of the term the factors came from will be updated
+ * as necessary.
+ *
+ * @param product a sibling_iterator corresponding to the product node that
+ * the factors came from. This may have its sign changed.
+ * @param factors an exptree with a product node as head, and the collected
+ * factors as children. This is what is put in order.
+ * @param first_unordered_term a sibling_iterator pointing to the term in
+ * factors from which the ordering should start. This is mostly used 
+ * internally by the function and omitting this argument will order from the 
+ * beginning.
 */
 void factor_out::order_factors(sibling_iterator product, exptree& factors, sibling_iterator first_unordered_term) {
 	bool passed_non_commuting_term = false;
@@ -2208,10 +2240,6 @@ void factor_out::order_factors(sibling_iterator product, exptree& factors, sibli
 	for (unsigned int tfo=0; tfo < to_factor_out.size(); ++tfo) {
 		// Try to pull out each factor in turn from the remaining unordered part of the
 		// expression.
-		// NOTE: If X doesn't commute with A or B, and A and B are (anti)commuting then this
-		// will not put X A B And X B A in the same order since it only tries to pull
-		// terms to the very front, which for A and B it cannot do. This will only affect
-		// complicated expressions but is worth trying to fix.
 		int sign = 1;
 		for(sibling_iterator psi=first_unordered_term; psi != factors.end(factors.begin()); ++psi) {
 			exptree_comparator comparator;
