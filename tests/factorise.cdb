@@ -142,3 +142,11 @@ A_{m n} D_{m p} Q_{n p} + A_{q r} E_{q t} F_{t s} Q_{r s} ;
 #    A_{m n} Q_{n q}  and  A_{m n} Q_{n p} as equal
 #
 #
+
+@reset.
+obj:= A_{a} B_{b} + A_{a} C_{b} + A_{b} D_{a};
+@factor_out!(%)(A_{a});
+tst: A_{a} (B_{b} + C_{b}) + A_{b} D_{a} - @(obj);
+@collect_terms!(%);
+@assert(%);
+
